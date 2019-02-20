@@ -98,12 +98,12 @@ kafka天然具备高吞吐量、内置分区等特性，因此非常适合处理
 
 #### 副本机制
 
-kafka通过ISO（副本同步队列）用来维护的是有资格的foller节点，如果leader挂掉以后就从iso队列中选取出新的leader，数据进入leader中foller会从leader拉去数据，如果foller不满足下方阈值那么就会被提出ISO中，如果foller的数据满足阈值就会被加入到队列中
+kafka通过ISR（副本同步队列）用来维护的是有资格的foller节点，如果leader挂掉以后就从iso队列中选取出新的leader，数据进入leader中foller会从leader拉去数据，如果foller不满足下方阈值那么就会被提出ISO中，如果foller的数据满足阈值就会被加入到队列中
 
 - 副本的所有节点都必须要和zookeeper保持连接状态 
 - 副本的最后一条消息的offset和leader副本的最后一条消息的offset之间的差值不能超过指定的阀值，这个阀值是可以设置的（replica.lag.max.messages） 
-
 - kafka为了提高可靠性提供了副本机制，他可以通过副本来实现故障转移。对于副本来说包括两个角色（leader和foller)，当kafka中的leader挂掉以后会通过zookeeper实现leader选举
+- 如果ISR的副本同步队列replica等于0 的时候，那么默认会选择一个或者的foller
 
 #### HW&LEO
 
@@ -112,9 +112,80 @@ kafka通过ISO（副本同步队列）用来维护的是有资格的foller节点
 - HW（HighWatermark ）：显示当前leader中所有的数据的offset的一个值，
 - LEO（Log End Offset ）：显示当前foller中都同步完成的一个值，如果所有的foller都同步到4，但是HW的值位0，那么LEO=4，HW=5
 
+#### 文件存储机制
 
+如果在在kafka中创建一个topic的话，会在topic的目录下创建以000开头的.log 和 .index 的文件，.log 存放日志，.index 存放的为索引，
 
+可以通过以下命令看到kafka的日志
 
+```sh kafka-run-class.sh kafka.tools.DumpLogSegments --files /tmp/kafka-logs/mytopic-0/00000000000000000000.log```
 
+demo 存放
 
+#### 消息确认的几种方式
+
+offset实际上维护的就是消息的偏移量，也就是说消息的消费其实就是更新kafka中offset的值，是每个partition的唯一的递增的标志
+
+- 自动提交：可以设置多久时间提交一次
+
+  ``` java
+   // 消息是否自动提交：offst
+  props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
+  // 消息自动提交的间隔
+  props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, "1000");
+  ```
+
+- 手动提交：
+
+  - 手动同步提交：```consumer.commitSync();```
+  - 手动异步提交：```consumer.commitAsync();```
+
+- 指定消费某个分区的消息
+
+  ```java
+  TopicPartition p0 = new TopicPartition(Kafka_Properties.TOPIC,0)
+  this.consumer.assign(Arrays.asList(p0));
+  ```
+
+  如果指定消费某个分区的消息，那么consumer就可以不能订阅某个TOPIC，指定分区和订阅topic是互斥的
+
+  因为的网络原因，kafka只能保证数据不丢失，但是不会保证数据不会被重复消费，那么遇到这种问题可以再本地的数据库保留一份offset用来开启事物操作
+
+- kafka实现消费和订阅
+
+```java
+props.put(ConsumerConfig.GROUP_ID_CONFIG, "DemoGroup2");//consumer1的分组
+props.put(ConsumerConfig.GROUP_ID_CONFIG, "DemoGroup1");//consumer2的分组
+```
+
+#### 消息的消费原理
+
+- 老版本的kafka的offset的进度是维护在zk上(0.8以前）：如果zk出现网络问题，那么kafka也会受到影响而且kafka的数据量比较多
+- 新版本的kafka吧consumer的offset维护保存在kafka的内部的topic
+
+kafka默认是50个分区，获取kafka的offset的信息的代码
+
+```java
+Math.abs("DemoGroup1".hashCode())%50
+```
+
+#### kafka分区分配策略
+
+同一个分区只能有同一个消费组内的consumer来消费，
+
+同一个consumer gorup内的consumer应该怎么去分配消费那个分区里的数据
+
+* Range 策略(范围)：对topic下的分区按照顺序，并且按照消费者按照字母顺序排序，算法是10(partition num)%3(consumer num ) = 1 (10个分区和3个消费者),这样的话那么三个消费者分为3,3,4三个片区，那么c0[0,1,2],c1[3,4,5],c2[6,7,8,9]
+
+* roundrobin 策略(轮询):同样的情况按照算法那分配，会把所有的分区和所有的消费者列出来然后按照hash进行排序，然后通过轮训算法分配到消费者手里那么结果就是c0[0,3,6,9],c1[1,4,7],c2[2,5,8]
+* 如果key为null那么为随机分配，可以通过实现```Partitioner``` 接口来自定义分区。
+
+配置kafka的分区策略的配置：partition.assignment.strategy
+
+consumer的rebalance策略的执行条件，rebalance发生变化就会影响分区消费策略
+
++ 当一个consumer group新增消费者
++ 当订阅的主体新增了分区（分区的数量发生了变化）
++ 消费者主动取消订阅某个主题
++ 某个分区或者某个broker crash等操作
 
