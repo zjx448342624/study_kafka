@@ -25,6 +25,7 @@ public class ProducerWithLoop implements Runnable {
         prop.put("bootstrap.servers",Kafka_Properties.KAFKA_BROKER_LIST);
         prop.put("key.serializer","org.apache.kafka.common.serialization.IntegerSerializer");
         prop.put("value.serializer","org.apache.kafka.common.serialization.StringSerializer");
+        prop.put("partitioner.class","com.zjxedu.kafka.study.MyPartition");
         prop.put("client.id","producerDemo");
 
         this.producer = new KafkaProducer<Integer, String>(prop);

@@ -189,3 +189,17 @@ consumer的rebalance策略的执行条件，rebalance发生变化就会影响分
 + 消费者主动取消订阅某个主题
 + 某个分区或者某个broker crash等操作
 
+如果kafka发送的消息的key等于null，那么kafka的分区是随机的，（在一个Metadata的同步周期内，默认为10分钟）
+
+
+
+consumer_offsets 文件里面保存的是group.id的offset的消息,也就是group消费的消息
+
+paritition里面保存的是发送的消息，但是他们的原理是一样的
+
+
+
+### 梳理
+
+当一个生产者生产了一个数据发送到kafka的broker的topic 上，而consumer是通过group的方式来订阅消息的，如果是同一个group那么在同一组内消费完这个消息后，改组的offset就会增加，并且把信息保存在consumer_offsets 中，不同的分组可以读同一个消息，因为paratition是顺序的所以当consumer组的offset值增加以后就不会读取到之前的数据了，而在group组里面的group通过两种方式读取paratition的数据，一个是范围，一个是轮训，通过这两种方式来确定一组consumer中的那个consumer来消费信息
+
